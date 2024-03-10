@@ -1,0 +1,236 @@
+---
+title: "RDS ICA"
+author: "B242415"
+date: "2023-12-03"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Importing Data and Libraries
+
+#### Required files: 
+1. data_all.csv - .csv file containing sample names in row 1 and gene names in column 1.\
+\
+2. gene_annotation.csv  - .csv file containing gene names and their type and long names.\
+\
+3. genelist_72.csv - .csv files containing genes of interest to be included in analysis.\
+\
+4. sample_annotation.csv - .csv file containing sample names and their treatment groups.\
+
+#### Required installed libraries: 
+1. pheatmap
+
+
+```{r import_data, echo=FALSE}
+#import libraries
+library(pheatmap)
+#import data
+try(data_all <- read.csv("data_all.csv"))
+try(gene_annotation <- read.csv("gene_annotation.csv"))
+try(genelist <- read.csv("genelist_72.txt"))
+try(sample_annotation <- read.csv("sample_annotation.csv"))
+
+#error checks for empty/missing data
+if(exists("data_all") && exists("gene_annotation") && exists("genelist") && exists("sample_annotation")){
+  print("Imported files!")
+} else {
+  print("At least one or more files has not been imported. Quitting...")
+  quit()
+}
+
+```
+\
+\
+
+## Data Filtering
+
+Extracting data from data_all.csv with only genes listed in genelist_72.csv into data_filtered dataframe.\
+
+
+```{r heatmap, echo=FALSE}
+#1. Get only data from genes in genelist into data_filtered
+data_filtered <- data.frame()
+
+genelist_lengthbefore <- as.numeric(length(genelist[,1]))
+
+genelist <- unique(genelist)
+
+for(selectgene in genelist[,1]){
+  for(i in 1:length(data_all[,1])){
+    if(selectgene == data_all[i,1]){
+      data_filtered <- rbind(data_filtered, data_all[i,])
+    }
+  }
+}
+
+#report duplicates
+if(length(genelist[,1]) != genelist_lengthbefore){
+  print(paste((genelist_lengthbefore - length(genelist[,1])), "duplicate(s) found in genelist.csv"))
+}
+
+print(paste(length(data_filtered[,1]) , " gene(s) seleced from data_all.csv for further processing.", sep=""))
+
+#report missing genes that are in genelist but not in data_all
+if(length(data_filtered[,1]) != length(genelist[,1])){
+  print(paste( (length(genelist[,1])-length(data_filtered[,1])), "gene(s) in genelist is not in data_all.csv... Continuing without them."))
+}
+
+```
+\
+\
+
+## Data Processing
+
+log scale the data into logdata dataframe.
+
+```{r data_processing, echo=FALSE}
+#2. log scale the data 
+logdata <- data_filtered
+
+countna=0
+for(val in 1:length(data_filtered[,1])){
+  for(sample in 1:length(data_filtered[1,])){
+    if(is.na(data_filtered[val,sample])){
+      countna = countna + 1
+    }
+    
+    logdata[val, sample] <- log(data_filtered[val, sample])
+  }
+}
+
+#report na value counts
+print(paste(countna,"NA values in data_filtered"))
+
+##2a. renaming colnames of logdata df
+i=1
+for (gene in logdata$`log_X`){
+  logdata$`log_X`[i] <- exp(gene)
+  i = i+1
+}
+
+plotdata <- cbind(data_filtered, logdata[,2:length(logdata)])
+
+print("Data log scaled.")
+
+```
+\
+\
+
+## Extracting annotations and long names
+Extracting gene type and treatment type annotations from sample_annotation.csv and gene_annotation.csv.\
+Also renaming gene names into their long name for heatmap plots.
+
+```{r annotations, echo=FALSE}
+#3. Annotate gene row with type of gene genetype
+genetype_vector <- c()
+for(gene in data_filtered$X){
+  i=0
+  for(annotation_gene in gene_annotation$X){
+    i = i + 1
+    if(gene == annotation_gene){
+      genetype_vector <- c(genetype_vector, gene_annotation$Type[i])
+      break
+    }
+  }
+}
+
+#check if all genes are in gene_annotation
+if(length(genetype_vector) != length(data_filtered[,1])){
+  print(paste( (length(data_filtered[,1])-length(genetype_vector)),"genes not included in gene_annotation.csv. Quitting... "))
+  quit()
+} else {
+  print("All genes annotated with gene type")
+}
+
+
+genetype_df <- data.frame(genetype_vector)
+rownames(genetype_df) <- rownames(data_filtered)
+
+#4. Annotate each sample with treatment group
+treatment_vector <- c()
+for(sample in colnames(data_filtered)[colnames(data_filtered) != "X"]){
+  i=0
+  for(annotation_sample in sample_annotation$SampleName){
+    i = i + 1
+    if(sample == annotation_sample){
+      treatment_vector <- c(treatment_vector, sample_annotation$TreatmentGroup[i])
+      break
+    }
+  }
+}
+
+#check if all samples are in sample_annotation
+if(length(treatment_vector) != length(data_filtered[,2:length(data_filtered[1,])])){
+  print(paste( (length(data_filtered[2:length(data_filtered[1,]),])-length(treatment_vector)),"genes not included in gene_annotation.csv. Quitting... "))
+  quit()
+} else{
+  print("All samples annotated with treatment groups")
+}
+
+treatment_df <- data.frame(treatment_vector)
+rownames(treatment_df) <- colnames(data_filtered)[colnames(data_filtered) != "X"]
+
+#5. Replace gene names with long names
+longname_vector <- c()
+for(gene in data_filtered$X){
+  i=0
+  for(annotation_gene in gene_annotation$X){
+    i = i + 1
+    if(gene == annotation_gene){
+      longname_vector <- c(longname_vector, gene_annotation$LongName[i])
+      break
+    }
+    
+  }
+}
+
+#check if all longnames present
+if(length(longname_vector) != length(data_filtered[,1])){
+  print(paste( (length(data_filtered[,1])-length(longname_vector)),"gene long names not included in gene_annotation.csv. Quitting... "))
+  quit()
+} else {
+  print("All genes renamed to their long names")
+}
+
+rownames(logdata) <- longname_vector
+rownames(genetype_df) <- longname_vector
+
+
+```
+\
+\
+
+## Heatmaps
+
+```{r heatmaps, echo=FALSE}
+#6. Plot heatmaps
+##6i. Rename annotation cols
+colnames(genetype_df) <- "Gene Type"
+colnames(treatment_df) <- "Treatment"
+##6a. genes and samples clustered
+pheatmap(logdata[,2:length(logdata)], 
+         annotation_row = genetype_df, 
+         annotation_col = treatment_df,
+         treeheight_row = 25,
+         treeheight_col = 25,
+         angle_col=315,
+         fontsize_row=7)
+##6b. only genes clustered
+pheatmap(logdata[,2:length(logdata)], 
+         annotation_row = genetype_df, 
+         annotation_col = treatment_df, 
+         cluster_cols=FALSE,
+         treeheight_row = 25,
+         treeheight_col = 25,
+         angle_col=315,
+         fontsize_row=7)
+
+
+```
